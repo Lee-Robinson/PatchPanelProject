@@ -1,0 +1,746 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patch Panel Manager</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 20px;
+            background-color: #131313;
+            color: #e0e0e0;
+        }
+        .room {
+            background-color: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 20px;
+        }
+        .patch-panel {
+            background-color: #1f1f1f;
+            border: 2px solid #444;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 20px;
+            width: 100%;
+            max-width: 1200px;
+        }
+        .ports-container {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: space-between;
+        }
+        .port {
+            width: 20px;
+            height: 20px;
+            background-color: #000;
+            border: 1px solid #444;
+            margin: 5px;
+            cursor: pointer;
+            position: relative;
+        }
+        .port::after {
+            content: attr(data-port-number);
+            position: absolute;
+            top: 25px;
+            left: 50%;
+            transform: translateX(-50%);
+            color: #fff;
+            font-size: 10px;
+        }
+        .port.configured {
+            background-color: #4CAF50;
+        }
+        .panel-label {
+            color: #fff;
+            font-size: 14px;
+            margin-bottom: 10px;
+            cursor: pointer;
+        }
+        .panel-description {
+            color: #ccc;
+            font-size: 12px;
+            margin-bottom: 10px;
+        }
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.4);
+        }
+        .modal-content {
+            background-color: #2a2a2a;
+            margin: 15% auto;
+            padding: 20px;
+            border: 1px solid #888;
+            width: 80%;
+            max-width: 500px;
+            color: #e0e0e0;
+        }
+        button {
+            background-color: #424bd1;
+            color: #ffffff;
+            padding: 10px 15px;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #3239a3;
+        }
+        select, input, textarea {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0 15px 0;
+            display: inline-block;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            box-sizing: border-box;
+            background-color: #3a3a3a;
+            color: #e0e0e0;
+        }
+        h1, h2, h3 {
+            color: #ffffff;
+        }
+        #projectLayout {
+            overflow: hidden;
+        }
+        #patchPanelsColumn {
+            float: left;
+            width: 58%;
+        }
+        #summaryColumn {
+            float: right;
+            width: 40%;
+            margin-left: 50px;
+        }
+        .panel-summary {
+            margin-bottom: 20px;
+        }
+        .panel-summary table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .panel-summary th, .panel-summary td {
+            border: 1px solid #444;
+            padding: 8px;
+            text-align: left;
+        }
+        .panel-summary th {
+            background-color: #2a2a2a;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Patch Panel Manager</h1>
+    </header>
+    <main>
+        <select id="projectSelect" onchange="loadProject()">
+            <option value="">Select a project</option>
+        </select>
+        <button id="createProjectBtn">Create New Project</button>
+        <button id="deleteProjectBtn" style="display:none;">Delete Project</button>
+        <input type="file" id="importFileInput" style="display: none;" accept=".json">
+        <button id="importProjectBtn">Import Project</button>
+        <button id="exportProjectBtn">Export Project</button>
+        <button id="exportHTMLBtn">Generate Site Report</button>
+        <div id="projectLayout" style="display: none;">
+            <div id="patchPanelsColumn"></div>
+            <div id="summaryColumn"></div>
+        </div>
+        <section id="projectContent" style="display:none;">
+            <h2 id="projectName"></h2>
+            <button onclick="openModal('editProjectModal')">Edit Project</button>
+            <div id="rooms"></div>
+            <button onclick="addRoom()">Add Room</button>
+        </section>
+    </main>
+
+    <div id="configModal" class="modal" role="dialog" aria-labelledby="configModalTitle">
+        <div class="modal-content">
+            <h2 id="configModalTitle">Configure Port</h2>
+            <p>Patch Panel: <span id="selectedPanel"></span>, Port: <span id="selectedPort"></span></p>
+            <label for="connectedPort">Connected to SwitchPort:</label>
+            <input type="text" id="connectedPort"><br>
+            <label for="vlan">VLAN:</label>
+            <select id="vlan"></select><br>
+            <label for="switch">Switch:</label>
+            <select id="switch"></select><br>
+            <label for="portNotes">Notes:</label>
+            <textarea id="portNotes" rows="3"></textarea><br>
+            <button onclick="saveConfiguration()">Save</button>
+            <button onclick="closeModal('configModal')">Cancel</button>
+        </div>
+    </div>
+
+    <div id="projectModal" class="modal" role="dialog" aria-labelledby="projectModalTitle">
+        <div class="modal-content">
+            <h2 id="projectModalTitle">Create New Project</h2>
+            <label for="newProjectName">Project Name:</label>
+            <input type="text" id="newProjectName"><br>
+            <h3>Rooms</h3>
+            <div id="roomInputs">
+                <input type="text" placeholder="Room name">
+            </div>
+            <button onclick="addRoomInput()">Add Room</button><br>
+            <h3>VLANs</h3>
+            <div id="vlanInputs">
+                <input type="text" placeholder="VLAN name">
+            </div>
+            <button onclick="addVlanInput()">Add VLAN</button><br>
+            <h3>Switches</h3>
+            <div id="switchInputs">
+                <input type="text" placeholder="Switch name">
+            </div>
+            <button onclick="addSwitchInput()">Add Switch</button><br>
+            <button onclick="saveProject()">Save Project</button>
+            <button onclick="closeModal('projectModal')">Cancel</button>
+        </div>
+    </div>
+
+    <div id="editProjectModal" class="modal" role="dialog" aria-labelledby="editProjectModalTitle">
+        <div class="modal-content">
+            <h2 id="editProjectModalTitle">Edit Project</h2>
+            <h3>Rooms</h3>
+            <div id="editRoomInputs"></div>
+            <button onclick="addEditRoomInput()">Add Room</button><br>
+            <h3>VLANs</h3>
+            <div id="editVlanInputs"></div>
+            <button onclick="addEditVlanInput()">Add VLAN</button><br>
+            <h3>Switches</h3>
+            <div id="editSwitchInputs"></div>
+            <button onclick="addEditSwitchInput()">Add Switch</button><br>
+            <button onclick="saveEditProject()">Save Changes</button>
+            <button onclick="closeModal('editProjectModal')">Cancel</button>
+        </div>
+    </div>
+
+    <div id="editPanelModal" class="modal" role="dialog" aria-labelledby="editPanelModalTitle">
+        <div class="modal-content">
+            <h2 id="editPanelModalTitle">Edit Patch Panel</h2>
+            <label for="editPanelName">Name:</label>
+            <input type="text" id="editPanelName"><br>
+            <label for="editPanelDescription">Description:</label>
+            <textarea id="editPanelDescription"></textarea><br>
+            <button onclick="savePanelEdit()">Save</button>
+            <button onclick="closeModal('editPanelModal')">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        let projects = JSON.parse(localStorage.getItem('projects')) || {};
+let currentProject = '';
+let currentRoom = '';
+let currentPanelIndex = '';
+
+function updateProjectSelect() {
+    const select = document.getElementById('projectSelect');
+    select.innerHTML = '<option value="">Select a project</option>';
+    for (let project in projects) {
+        const option = document.createElement('option');
+        option.value = project;
+        option.textContent = project;
+        select.appendChild(option);
+    }
+}
+
+function loadProject() {
+    currentProject = document.getElementById('projectSelect').value;
+    if (currentProject) {
+        document.getElementById('projectContent').style.display = 'block';
+        document.getElementById('projectName').textContent = currentProject;
+        document.getElementById('deleteProjectBtn').style.display = 'inline-block';
+        renderRooms();
+    } else {
+        document.getElementById('projectContent').style.display = 'none';
+        document.getElementById('deleteProjectBtn').style.display = 'none';
+    }
+}
+
+function addRoomInput() {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Room name';
+    document.getElementById('roomInputs').appendChild(input);
+}
+
+function addVlanInput() {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'VLAN name';
+    document.getElementById('vlanInputs').appendChild(input);
+}
+
+function addSwitchInput() {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Switch name';
+    document.getElementById('switchInputs').appendChild(input);
+}
+
+function saveProject() {
+    const projectName = document.getElementById('newProjectName').value;
+    if (!projectName) {
+        alert('Please enter a project name');
+        return;
+    }
+    const rooms = Array.from(document.getElementById('roomInputs').children)
+        .map(input => input.value)
+        .filter(value => value);
+    const vlans = Array.from(document.getElementById('vlanInputs').children)
+        .map(input => input.value)
+        .filter(value => value);
+    const switches = Array.from(document.getElementById('switchInputs').children)
+        .map(input => input.value)
+        .filter(value => value);
+    projects[projectName] = { rooms: {}, vlans, switches };
+    rooms.forEach(room => {
+        projects[projectName].rooms[room] = [];
+    });
+    saveProjects();
+    updateProjectSelect();
+    closeModal('projectModal');
+}
+
+function renderRooms() {
+    const container = document.getElementById('patchPanelsColumn');
+    const summaryContainer = document.getElementById('summaryColumn');
+    container.innerHTML = '';
+    summaryContainer.innerHTML = '';
+    for (let room in projects[currentProject].rooms) {
+        const roomDiv = document.createElement('div');
+        roomDiv.className = 'room';
+        roomDiv.innerHTML = `
+            <h3>${room}</h3>
+            <button onclick="addPatchPanel('${room}')">Add Patch Panel</button>
+            <div id="${room}-patchPanels"></div>
+        `;
+        container.appendChild(roomDiv);
+        renderPatchPanels(room);
+    }
+    document.getElementById('projectLayout').style.display = 'block';
+}
+
+function renderPatchPanels(room) {
+    const container = document.getElementById(`${room}-patchPanels`);
+    const summaryContainer = document.getElementById('summaryColumn');
+    container.innerHTML = '';
+    projects[currentProject].rooms[room].forEach((panel, panelIndex) => {
+        const panelDiv = document.createElement('div');
+        panelDiv.className = 'patch-panel';
+        panelDiv.innerHTML = `
+            <div class="panel-label" onclick="editPanel('${room}', ${panelIndex})">${panel.name}</div>
+            <div class="panel-description">${panel.description || ''}</div>
+            <div class="ports-container">
+                ${Array(24).fill().map((_, i) => `
+                    <div class="port ${panel.ports[i+1] ? 'configured' : ''}" 
+                         data-port-number="${i+1}" 
+                         onclick="openConfigModal('${room}', ${panelIndex}, ${i+1})">
+                    </div>
+                `).join('')}
+            </div>
+        `;
+        container.appendChild(panelDiv);
+        renderSummary(room, panelIndex, summaryContainer);
+    });
+}
+
+function renderSummary(room, panelIndex, container) {
+    const panel = projects[currentProject].rooms[room][panelIndex];
+    const summaryDiv = document.createElement('div');
+    summaryDiv.className = 'panel-summary';
+    summaryDiv.innerHTML = `
+        <h4>${panel.name} Summary - ${room}</h4>
+        <table>
+            <tr>
+                <th>Port</th>
+                <th>Switch</th>
+                <th>Switch Port</th>
+                <th>VLAN</th>
+                <th>Notes</th>
+            </tr>
+            ${Object.entries(panel.ports).map(([portNumber, config]) => `
+                <tr>
+                    <td>${portNumber}</td>
+                    <td>${config.switch || 'N/A'}</td>
+                    <td>${config.connectedPort || 'N/A'}</td>
+                    <td>${config.vlan || 'N/A'}</td>
+                    <td>${config.notes || 'N/A'}</td>
+                </tr>
+            `).join('')}
+        </table>
+    `;
+    container.appendChild(summaryDiv);
+}
+function addRoom() {
+    const roomName = prompt("Enter room name:");
+    if (roomName && !projects[currentProject].rooms[roomName]) {
+        projects[currentProject].rooms[roomName] = [];
+        saveProjects();
+        renderRooms();
+    } else if (projects[currentProject].rooms[roomName]) {
+        alert("Room already exists!");
+    }
+}
+
+function addPatchPanel(room) {
+    projects[currentProject].rooms[room].push({
+        name: `Patch Panel ${projects[currentProject].rooms[room].length + 1}`,
+        description: '',
+        ports: {}
+    });
+    saveProjects();
+    renderRooms();
+}
+
+function editPanel(room, panelIndex) {
+    currentRoom = room;
+    currentPanelIndex = panelIndex;
+    const panel = projects[currentProject].rooms[room][panelIndex];
+    document.getElementById('editPanelName').value = panel.name;
+    document.getElementById('editPanelDescription').value = panel.description || '';
+    openModal('editPanelModal');
+}
+
+function savePanelEdit() {
+    const newName = document.getElementById('editPanelName').value;
+    const newDescription = document.getElementById('editPanelDescription').value;
+    if (newName) {
+        projects[currentProject].rooms[currentRoom][currentPanelIndex].name = newName;
+        projects[currentProject].rooms[currentRoom][currentPanelIndex].description = newDescription;
+        saveProjects();
+        renderRooms();
+        closeModal('editPanelModal');
+    }
+}
+
+function openConfigModal(room, panelIndex, portNumber) {
+    currentRoom = room;
+    currentPanelIndex = panelIndex;
+    document.getElementById('selectedPanel').textContent = projects[currentProject].rooms[room][panelIndex].name;
+    document.getElementById('selectedPort').textContent = portNumber;
+    const config = projects[currentProject].rooms[room][panelIndex].ports[portNumber] || {};
+    document.getElementById('connectedPort').value = config.connectedPort || '';
+    document.getElementById('portNotes').value = config.notes || '';
+    
+    const vlanSelect = document.getElementById('vlan');
+    vlanSelect.innerHTML = '';
+    projects[currentProject].vlans.forEach(vlan => {
+        const option = document.createElement('option');
+        option.value = vlan;
+        option.textContent = vlan;
+        vlanSelect.appendChild(option);
+    });
+    vlanSelect.value = config.vlan || '';
+
+    const switchSelect = document.getElementById('switch');
+    switchSelect.innerHTML = '';
+    projects[currentProject].switches.forEach(sw => {
+        const option = document.createElement('option');
+        option.value = sw;
+        option.textContent = sw;
+        switchSelect.appendChild(option);
+    });
+    switchSelect.value = config.switch || '';
+
+    openModal('configModal');
+}
+
+function saveConfiguration() {
+    const portNumber = document.getElementById('selectedPort').textContent;
+    const config = {
+        connectedPort: document.getElementById('connectedPort').value,
+        vlan: document.getElementById('vlan').value,
+        switch: document.getElementById('switch').value,
+        notes: document.getElementById('portNotes').value
+    };
+    projects[currentProject].rooms[currentRoom][currentPanelIndex].ports[portNumber] = config;
+    saveProjects();
+    renderRooms();
+    closeModal('configModal');
+}
+
+function openModal(modalId) {
+    if (modalId === 'editProjectModal') {
+        populateEditProjectModal();
+    }
+    document.getElementById(modalId).style.display = 'block';
+}
+
+function closeModal(modalId) {
+    document.getElementById(modalId).style.display = 'none';
+}
+
+function saveProjects() {
+    localStorage.setItem('projects', JSON.stringify(projects));
+}
+
+function populateEditProjectModal() {
+    const roomInputs = document.getElementById('editRoomInputs');
+    const vlanInputs = document.getElementById('editVlanInputs');
+    const switchInputs = document.getElementById('editSwitchInputs');
+    roomInputs.innerHTML = '';
+    vlanInputs.innerHTML = '';
+    switchInputs.innerHTML = '';
+
+    for (let room in projects[currentProject].rooms) {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = room;
+        roomInputs.appendChild(input);
+    }
+
+    projects[currentProject].vlans.forEach(vlan => {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = vlan;
+        vlanInputs.appendChild(input);
+    });
+
+    projects[currentProject].switches.forEach(sw => {
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.value = sw;
+        switchInputs.appendChild(input);
+    });
+}
+
+function addEditRoomInput() {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'New room name';
+    document.getElementById('editRoomInputs').appendChild(input);
+}
+
+function addEditVlanInput() {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'New VLAN name';
+    document.getElementById('editVlanInputs').appendChild(input);
+}
+
+function addEditSwitchInput() {
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'New Switch name';
+    document.getElementById('editSwitchInputs').appendChild(input);
+}
+
+function saveEditProject() {
+    const rooms = Array.from(document.getElementById('editRoomInputs').children)
+        .map(input => input.value)
+        .filter(value => value);
+    const vlans = Array.from(document.getElementById('editVlanInputs').children)
+        .map(input => input.value)
+        .filter(value => value);
+    const switches = Array.from(document.getElementById('editSwitchInputs').children)
+        .map(input => input.value)
+        .filter(value => value);
+    
+    projects[currentProject].vlans = vlans;
+    projects[currentProject].switches = switches;
+
+    // Update rooms
+    const newRooms = {};
+    rooms.forEach(room => {
+        if (projects[currentProject].rooms[room]) {
+            newRooms[room] = projects[currentProject].rooms[room];
+        } else {
+            newRooms[room] = [];
+        }
+    });
+    projects[currentProject].rooms = newRooms;
+
+    saveProjects();
+    closeModal('editProjectModal');
+    renderRooms();
+}
+
+function deleteProject() {
+    if (currentProject) {
+        if (confirm(`Are you sure you want to delete the project "${currentProject}"?`)) {
+            delete projects[currentProject];
+            saveProjects();
+            currentProject = '';
+            updateProjectSelect();
+            document.getElementById('projectContent').style.display = 'none';
+            document.getElementById('deleteProjectBtn').style.display = 'none';
+        }
+    }
+}
+
+function exportProject() {
+    if (!currentProject) {
+        alert("Please select a project first.");
+        return;
+    }
+
+    // Export CSV
+    let csvContent = "Room,Patch Panel,Port,Switch,Switch Port,VLAN,Notes\n";
+    
+    const project = projects[currentProject];
+    for (let roomName in project.rooms) {
+        const room = project.rooms[roomName];
+        room.forEach((panel) => {
+            for (let portNumber in panel.ports) {
+                const port = panel.ports[portNumber];
+                csvContent += `${roomName},${panel.name},${portNumber},${port.switch},${port.connectedPort},${port.vlan},${port.notes || ''}\n`;
+            }
+        });
+    }
+    
+    const csvEncodedUri = encodeURI("data:text/csv;charset=utf-8," + csvContent);
+    const csvLink = document.createElement("a");
+    csvLink.setAttribute("href", csvEncodedUri);
+    csvLink.setAttribute("download", `${currentProject}_patch_panel_data.csv`);
+    document.body.appendChild(csvLink);
+    csvLink.click();
+    document.body.removeChild(csvLink);
+
+    // Export JSON
+    const jsonContent = JSON.stringify({ [currentProject]: project });
+    const jsonBlob = new Blob([jsonContent], { type: 'application/json' });
+    const jsonUrl = URL.createObjectURL(jsonBlob);
+    const jsonLink = document.createElement("a");
+    jsonLink.setAttribute("href", jsonUrl);
+    jsonLink.setAttribute("download", `${currentProject}_project_data.json`);
+    document.body.appendChild(jsonLink);
+    jsonLink.click();
+    document.body.removeChild(jsonLink);
+}
+
+function importProject(event) {
+    const file = event.target.files[0];
+    if (file) {
+        const reader = new FileReader();
+        reader.onload = function(e) {
+            try {
+                const importedProject = JSON.parse(e.target.result);
+                const projectName = Object.keys(importedProject)[0];
+                
+                if (projects[projectName]) {
+                    if (confirm(`A project named "${projectName}" already exists. Do you want to overwrite it?`)) {
+                        projects[projectName] = importedProject[projectName];
+                    } else {
+                        return;
+                    }
+                } else {
+                    projects[projectName] = importedProject[projectName];
+                }
+                
+                saveProjects();
+                updateProjectSelect();
+                alert("Project imported successfully!");
+            } catch (error) {
+                alert("Error importing project. Please make sure the file is a valid JSON export.");
+                console.error(error);
+            }
+        };
+        reader.readAsText(file);
+    }
+}
+
+function generateSiteReport() {
+    if (!currentProject) {
+        alert("Please select a project first.");
+        return;
+    }
+
+    let htmlContent = `
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>${currentProject} - Patch Panel Site Report</title>
+        <style>
+            body { font-family: Arial, sans-serif; line-height: 1.6; margin: 0; padding: 20px; }
+            table { border-collapse: collapse; width: 100%; margin-bottom: 20px; }
+            th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+            th { background-color: #f2f2f2; }
+        </style>
+    </head>
+    <body>
+        <h1>${currentProject} - Patch Panel Site Report</h1>
+    `;
+
+    const project = projects[currentProject];
+    for (let roomName in project.rooms) {
+        const room = project.rooms[roomName];
+        htmlContent += `<h2>Room: ${roomName}</h2>`;
+        
+        room.forEach((panel) => {
+            htmlContent += `
+            <h3>Patch Panel: ${panel.name}</h3>
+            <p>Description: ${panel.description || 'N/A'}</p>
+            <table>
+                <tr>
+                    <th>Port</th>
+                    <th>Switch</th>
+                    <th>Switch Port</th>
+                    <th>VLAN</th>
+                    <th>Notes</th>
+                </tr>
+            `;
+            
+            for (let portNumber in panel.ports) {
+                const port = panel.ports[portNumber];
+                htmlContent += `
+                <tr>
+                    <td>${portNumber}</td>
+                    <td>${port.switch || 'N/A'}</td>
+                    <td>${port.connectedPort || 'N/A'}</td>
+                    <td>${port.vlan || 'N/A'}</td>
+                    <td>${port.notes || 'N/A'}</td>
+                </tr>
+                `;
+            }
+            
+            htmlContent += `</table>`;
+        });
+    }
+
+    htmlContent += `
+    </body>
+    </html>
+    `;
+
+    const blob = new Blob([htmlContent], { type: 'text/html' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${currentProject}_patch_panel_site_report.html`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('createProjectBtn').addEventListener('click', function() {
+        openModal('projectModal');
+    });
+
+    document.getElementById('deleteProjectBtn').addEventListener('click', deleteProject);
+    document.getElementById('exportProjectBtn').addEventListener('click', exportProject);
+    document.getElementById('exportHTMLBtn').addEventListener('click', generateSiteReport);
+    document.getElementById('importProjectBtn').addEventListener('click', function() {
+        document.getElementById('importFileInput').click();
+    });
+    document.getElementById('importFileInput').addEventListener('change', importProject);
+
+    updateProjectSelect();
+});
+    </script>
+</body>
+</html>
